@@ -1,0 +1,3 @@
+/mnt/d/game111/Breakout/build/CMakeFiles/breakout_week2.dir
+/mnt/d/game111/Breakout/build/CMakeFiles/edit_cache.dir
+/mnt/d/game111/Breakout/build/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,40 @@
+建议给同学们的备份方法
+方法1：创建压缩包备份
+
+# 进入项目上级目录
+cd ~/Test
+
+# 创建备份
+tar -czf Breakout_backup_$(date +%Y%m%d).tar.gz Breakout/
+
+# 查看备份
+ls -lh *.tar.gz
+方法2：使用 Git 版本控制
+
+cd ~/Test/Breakout
+git init
+git add .
+git commit -m "初始版本"
+
+
+# 常用指令
+echo 'export DISPLAY=$(cat /etc/resolv.conf | grep nameserver | awk '"'"'{print $2}'"'"'):0' >> ~/.bashrc
+source ~/.bashrc
+
+
+export DISPLAY=:0
+./breakout_week2
+
+
+cd ~/Test/Breakout/build
+make
+./breakout_week2
+
+
+cd ~/Test/Breakout/build
+make clean
+make
+./breakout_week2
+
+
+
