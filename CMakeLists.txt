@@ -3,8 +3,15 @@ project(Breakout)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# 你原来的 raylib 配置
 include_directories(${CMAKE_SOURCE_DIR}/raylib-5.0/src)
 link_directories(${CMAKE_SOURCE_DIR}/raylib-5.0/build/raylib)
+
+# ==================== ENet 新增部分（我帮你加好了）====================
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ENET REQUIRED libenet)
+include_directories(${ENET_INCLUDE_DIRS})
+# ====================================================================
 
 add_executable(breakout_week2 
     src/main.cpp 
@@ -15,4 +22,6 @@ add_executable(breakout_week2
     src/Particle.cpp
 )
 
-target_link_libraries(breakout_week2 raylib m pthread dl rt X11)
+# ==================== ENet 链接（我帮你加好了）====================
+target_link_libraries(breakout_week2 raylib m pthread dl rt X11 ${ENET_LIBRARIES})
+# =================================================================

@@ -11,7 +11,37 @@
 #include <ctime>
 #include <cmath>
 #include <algorithm>
+#include <enet/enet.h>
+#include <iostream>
+#include <string>
 
+// ===================== 联机核心结构体 =====================
+#pragma pack(push, 1)
+struct GameState {
+    float ballX, ballY;
+    float ballSpeedX, ballSpeedY;
+    float paddle1X;
+    float paddle2X;
+    int score;
+    int lives;
+    double timestamp;
+};
+
+struct PaddleInput {
+    float x;
+};
+#pragma pack(pop)
+
+// ===================== 全局网络变量 =====================
+ENetHost* netHost = nullptr;
+ENetPeer* netPeer = nullptr;
+bool isHost = false;
+GameState remoteState = {};
+GameState lastState = {};
+bool hasLastState = false;
+PaddleInput currentInput = {};
+
+// ===================== 你的原有代码开始 =====================
 struct ScoreEntry {
     char name[32];
     int score;
@@ -83,13 +113,11 @@ static Font chineseFont;
 static bool fontLoaded = false;
 
 void InitChineseFont() {
-    // ✅ 只保留游戏真实用到的所有汉字
     const char* text = "分数生命暂停继续重新开始游戏结束胜利排行榜第名按P-暂停按R-重新开始时间倍率落地惩罚恭喜进入空格发射等待加长板多球减速球暂无记录秒 BOOST 按 M 查看排行榜 : !          ";
 
     int codepointCount = 0;
     int* codepoints = LoadCodepoints(text, &codepointCount);
 
-    // ✅ 修复路径，适配你的项目结构
     const char* fontPaths[] = {
         "./fonts/NotoSansSC.otf",
         "../fonts/NotoSansSC.otf",
@@ -102,7 +130,6 @@ void InitChineseFont() {
     for (int i = 0; i < 5; i++) {
         if (FileExists(fontPaths[i])) {
             printf("找到字体文件: %s\n", fontPaths[i]);
-            // ✅ 关键：统一字体大小 24，避免错位
             chineseFont = LoadFontEx(fontPaths[i], 24, codepoints, codepointCount);
             if (chineseFont.texture.id != 0) {
                 printf("✅ 中文字体加载成功！\n");
@@ -120,7 +147,6 @@ void InitChineseFont() {
     UnloadCodepoints(codepoints);
 }
 
-// ✅ 统一字体大小、字间距，彻底解决错字乱码
 void DrawChineseText(const char* text, int x, int y, int fontSize, Color color) {
     Vector2 pos = { (float)x, (float)y };
     DrawTextEx(chineseFont, text, pos, 24, 2, color);
@@ -235,9 +261,41 @@ void UpdateActiveEffects(float delta, Paddle& paddle, std::vector<Ball>& balls, 
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (enet_initialize() != 0) {
+        std::cout << "ENet 初始化失败！" << std::endl;
+        return 1;
+    }
+    std::cout << "ENet 初始化成功！" << std::endl;
+
+    if (argc > 1 && std::string(argv[1]) == "host") {
+        isHost = true;
+        std::cout << "✅ 以主机模式启动\n";
+    } else if (argc > 1 && std::string(argv[1]) == "client") {
+        isHost = false;
+        std::cout << "✅ 以客户端模式启动\n";
+    } else {
+        std::cout << "用法：./breakout_week2 host|client\n";
+        return 1;
+    }
+
+    if (isHost) {
+        ENetAddress address;
+        enet_address_set_host(&address, "0.0.0.0");
+        address.port = 1234;
+        netHost = enet_host_create(&address, 1, 2, 0, 0);
+        std::cout << "✅ 主机已启动，等待客户端连接...\n";
+    } else {
+        netHost = enet_host_create(NULL, 1, 2, 0, 0);
+        ENetAddress address;
+        enet_address_set_host(&address, "127.0.0.1");
+        address.port = 1234;
+        netPeer = enet_host_connect(netHost, &address, 2, 0);
+        std::cout << "🔗 正在连接主机...\n";
+    }
+
     const int screenWidth = 800, screenHeight = 600;
-    InitWindow(screenWidth, screenHeight, "Breakout - Enhanced Edition");
+    InitWindow(screenWidth, screenHeight, "Breakout - 联机版");
     InitChineseFont();
     Leaderboard leaderboard("scores.txt");
     
@@ -264,7 +322,59 @@ int main() {
     float gameTime = 0.0f;
 
     SetTargetFPS(60);
+    
     while (!WindowShouldClose()) {
+        ENetEvent event;
+        while (enet_host_service(netHost, &event, 0) > 0) {
+            if (event.type == ENET_EVENT_TYPE_CONNECT) {
+                std::cout << "✅ 玩家连接成功！" << std::endl;
+                netPeer = event.peer;
+            }
+            if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+                if (isHost) {
+                    PaddleInput in = *(PaddleInput*)event.packet->data;
+                    remoteState.paddle2X = in.x;
+                } else {
+                    if (hasLastState) lastState = remoteState;
+                    else hasLastState = true;
+                    remoteState = *(GameState*)event.packet->data;
+                }
+                enet_packet_destroy(event.packet);
+            }
+            if (event.type == ENET_EVENT_TYPE_DISCONNECT) {
+                std::cout << "❌ 连接断开！" << std::endl;
+                hasLastState = false;
+                netPeer = nullptr;
+            }
+        }
+
+        static float sendTimer = 0;
+        sendTimer += GetFrameTime();
+        if (isHost && netPeer && sendTimer > 1.0f / 30.0f) {
+            GameState s{};
+            if (!balls.empty()) {
+                s.ballX = balls[0].GetPosition().x;
+                s.ballY = balls[0].GetPosition().y;
+                s.ballSpeedX = balls[0].GetSpeed().x;
+                s.ballSpeedY = balls[0].GetSpeed().y;
+            }
+            s.paddle1X = paddle.GetRect().x;
+            s.paddle2X = remoteState.paddle2X;
+            s.score = score;
+            s.lives = lives;
+            s.timestamp = GetTime();
+
+            ENetPacket* packet = enet_packet_create(&s, sizeof(s), ENET_PACKET_FLAG_RELIABLE);
+            enet_peer_send(netPeer, 0, packet);
+            sendTimer = 0;
+        }
+
+        if (!isHost) {
+            currentInput.x = paddle.GetRect().x;
+            ENetPacket* packet = enet_packet_create(&currentInput, sizeof(currentInput), 0);
+            enet_peer_send(netPeer, 0, packet);
+        }
+
         if (IsKeyPressed(KEY_P) && !gameOver) paused = !paused;
         if (IsKeyPressed(KEY_R)) {
             balls.clear();
@@ -283,6 +393,8 @@ int main() {
         float delta = GetFrameTime();
         if (!gameOver && !paused) {
             if (!balls.empty() && balls.front().IsLaunched()) gameTime += delta;
+
+            // ===================== 双人分离控制逻辑 =====================
             float currentSpeed = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 28.0f : 18.0f;
             if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) paddle.MoveLeft(currentSpeed);
             if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) paddle.MoveRight(currentSpeed);
@@ -360,14 +472,33 @@ int main() {
         for (auto& brick : bricks) brick.Draw();
         for (auto& powerup : powerups) powerup.Draw(chineseFont);
         particles.Draw();
-        paddle.Draw();
-        for (auto& ball : balls) ball.Draw();
 
-        // ✅ 所有中文都用 DrawChineseText
+        // ===================== 双人分离绘制逻辑 =====================
+        if (isHost) {
+            paddle.Draw();
+            for (auto& ball : balls) ball.Draw();
+            DrawRectangle(remoteState.paddle2X, 550, DEFAULT_PADDLE_WIDTH, 15, RED);
+        } else {
+            paddle.Draw();
+            DrawRectangle(remoteState.paddle1X, 550, DEFAULT_PADDLE_WIDTH, 15, BLUE);
+
+            if (hasLastState) {
+                double now = GetTime();
+                float t = (now - lastState.timestamp) / (remoteState.timestamp - lastState.timestamp + 0.001f);
+                t = (t < 0.0f) ? 0.0f : (t > 1.0f) ? 1.0f : t;
+
+                float drawBallX = lastState.ballX * (1 - t) + remoteState.ballX * t;
+                float drawBallY = lastState.ballY * (1 - t) + remoteState.ballY * t;
+                DrawCircle(drawBallX, drawBallY, 10, WHITE);
+            } else {
+                DrawCircle(remoteState.ballX, remoteState.ballY, 10, WHITE);
+            }
+        }
+
         DrawChineseText("分数:", 20, 8, 24, WHITE);
-        DrawText(TextFormat("%d", score), 80, 10, 24, YELLOW);
+        DrawText(TextFormat("%d", isHost ? score : remoteState.score), 80, 10, 24, YELLOW);
         DrawChineseText("生命:", 650, 8, 24, WHITE);
-        DrawText(TextFormat("%d", lives), 710, 10, 24, lives > 1 ? GREEN : RED);
+        DrawText(TextFormat("%d", isHost ? lives : remoteState.lives), 710, 10, 24, lives > 1 ? GREEN : RED);
         DrawChineseText("时间:", 20, 35, 20, Fade(WHITE, 0.8f));
         DrawText(TextFormat("%.1f", gameTime), 75, 37, 20, Fade(WHITE, 0.8f));
 
@@ -433,6 +564,10 @@ int main() {
         }
         EndDrawing();
     }
+
+    if (netHost) enet_host_destroy(netHost);
+    enet_deinitialize();
+
     CloseWindow();
     return 0;
 }
