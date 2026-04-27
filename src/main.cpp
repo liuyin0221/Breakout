@@ -14,6 +14,11 @@
 #include <enet/enet.h>
 #include <iostream>
 #include <string>
+#include <thread>
+#include <mutex>
+#include <future>
+#include <chrono>
+#include <unordered_map>
 
 // ===================== 联机核心结构体 =====================
 #pragma pack(push, 1)
@@ -40,6 +45,56 @@ GameState remoteState = {};
 GameState lastState = {};
 bool hasLastState = false;
 PaddleInput currentInput = {};
+
+// ===================== 本周任务：多线程相关 =====================
+enum class LoadState { IDLE, LOADING, DONE };
+LoadState loadState = LoadState::IDLE;
+std::future<void> loadFuture;
+std::mutex loadMutex;
+bool bricksLoaded = false; // 共享状态：砖块是否加载完成
+
+// 线程安全的纹理缓存（加分项）
+class TextureCache {
+private:
+    std::unordered_map<std::string, Texture2D> cache;
+    mutable std::mutex mtx;
+
+    TextureCache() = default;
+public:
+    static TextureCache& getInstance() {
+        static TextureCache instance;
+        return instance;
+    }
+
+    Texture2D get(const std::string& path) {
+        std::lock_guard<std::mutex> lock(mtx);
+        auto it = cache.find(path);
+        if (it != cache.end()) return it->second;
+        
+        // 实际项目中这里用 LoadTexture，我们这里用占位
+        Texture2D tex = LoadTexture(path.c_str());
+        cache[path] = tex;
+        return tex;
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(mtx);
+        for (auto& pair : cache) {
+            UnloadTexture(pair.second);
+        }
+        cache.clear();
+    }
+};
+
+// 模拟异步加载函数
+void LoadLevelAsync() {
+    // 模拟耗时加载（sleep代替大型纹理加载）
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+    // 加载完成后修改共享状态
+    std::lock_guard<std::mutex> lock(loadMutex);
+    bricksLoaded = true;
+}
 
 // ===================== 你的原有代码开始 =====================
 struct ScoreEntry {
@@ -113,7 +168,7 @@ static Font chineseFont;
 static bool fontLoaded = false;
 
 void InitChineseFont() {
-    const char* text = "分数生命暂停继续重新开始游戏结束胜利排行榜第名按P-暂停按R-重新开始时间倍率落地惩罚恭喜进入空格发射等待加长板多球减速球暂无记录秒 BOOST 按 M 查看排行榜 : !          ";
+    const char* text = "分数生命暂停继续重新开始游戏结束胜利排行榜第名按P-暂停按R-重新开始时间倍率落地惩罚恭喜进入空格发射等待加长板多球减速球暂无记录秒 BOOST 按 M 查看排行榜 : !    Breakout - 联机版 + 多线程     加载完成！砖块已变色 L ding...";
 
     int codepointCount = 0;
     int* codepoints = LoadCodepoints(text, &codepointCount);
@@ -295,7 +350,7 @@ int main(int argc, char* argv[]) {
     }
 
     const int screenWidth = 800, screenHeight = 600;
-    InitWindow(screenWidth, screenHeight, "Breakout - 联机版");
+    InitWindow(screenWidth, screenHeight, "Breakout - 联机版 + 多线程");
     InitChineseFont();
     Leaderboard leaderboard("scores.txt");
     
@@ -387,8 +442,30 @@ int main(int argc, char* argv[]) {
             bricks.clear();
             for (int row = 0; row < 5; row++) for (int col = 0; col < 8; col++) bricks.emplace_back(50 + col * 95, 80 + row * 35, 85, 25, brickColors[row]);
             winCount = (int)bricks.size();
+            // 重置加载状态
+            loadState = LoadState::IDLE;
+            bricksLoaded = false;
         }
         if (IsKeyPressed(KEY_M)) showLeaderboard = !showLeaderboard;
+
+        // ===================== 本周任务：异步加载控制 =====================
+        if (IsKeyPressed(KEY_L) && loadState == LoadState::IDLE) {
+            loadState = LoadState::LOADING;
+            bricksLoaded = false;
+            loadFuture = std::async(std::launch::async, LoadLevelAsync);
+        }
+
+        // 检查加载是否完成
+        if (loadState == LoadState::LOADING) {
+            auto status = loadFuture.wait_for(std::chrono::seconds(0));
+            if (status == std::future_status::ready) {
+                loadState = LoadState::DONE;
+                // 加载完成后修改砖块颜色（作为反馈）
+                for (auto& brick : bricks) {
+                    brick.SetColor(PURPLE);
+                }
+            }
+        }
 
         float delta = GetFrameTime();
         if (!gameOver && !paused) {
@@ -495,6 +572,13 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // 本周任务：绘制Loading动画
+        if (loadState == LoadState::LOADING) {
+            DrawChineseTextCentered("Loading...", screenHeight / 2, 30, YELLOW);
+        } else if (loadState == LoadState::DONE) {
+            DrawChineseTextCentered("加载完成！砖块已变色", screenHeight / 2, 24, GREEN);
+        }
+
         DrawChineseText("分数:", 20, 8, 24, WHITE);
         DrawText(TextFormat("%d", isHost ? score : remoteState.score), 80, 10, 24, YELLOW);
         DrawChineseText("生命:", 650, 8, 24, WHITE);
@@ -514,7 +598,7 @@ int main(int argc, char* argv[]) {
 
         if (!balls.empty() && !balls.front().IsLaunched()) DrawChineseTextCentered("按空格发射", 55, 20, YELLOW);
         DrawChineseTextCentered("按 M 查看排行榜", 40, 20, Fade(WHITE, 0.7f));
-        DrawChineseText("P-暂停 R-重开 M-排行", 280, 12, 18, Fade(WHITE, 0.6f));
+        DrawChineseText("P-暂停 R-重开 M-排行 L-加载", 280, 12, 18, Fade(WHITE, 0.6f));
         if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) DrawChineseText(">>> BOOST <<<", 350, 575, 18, YELLOW);
 
         if (paused && !gameOver) {
@@ -567,6 +651,7 @@ int main(int argc, char* argv[]) {
 
     if (netHost) enet_host_destroy(netHost);
     enet_deinitialize();
+    TextureCache::getInstance().clear();
 
     CloseWindow();
     return 0;
