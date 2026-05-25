@@ -1,0 +1,26 @@
+[
+  {
+    "type": "extend_paddle",
+    "name": "加长板",
+    "duration": 10.0,
+    "chance": 0.20,
+    "color": [100, 200, 255, 255],
+    "size": 30.0
+  },
+  {
+    "type": "multi_ball",
+    "name": "多球",
+    "duration": 8.0,
+    "chance": 0.15,
+    "color": [255, 220, 120, 255],
+    "size": 30.0
+  },
+  {
+    "type": "slow_ball",
+    "name": "减速球",
+    "duration": 10.0,
+    "chance": 0.15,
+    "color": [120, 255, 180, 255],
+    "size": 30.0
+  }
+]
