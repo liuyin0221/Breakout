@@ -21,12 +21,13 @@
 #include <unordered_map>
 #include <fstream>
 
-// 适配系统安装的 nlohmann-json
+// JSON解析库头文件引入
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
 
 // ===================== 联机核心结构体 =====================
 #pragma pack(push, 1)
+// 全局游戏状态同步结构体
 struct GameState {
     float ballX, ballY;
     float ballSpeedX, ballSpeedY;
@@ -36,7 +37,7 @@ struct GameState {
     int lives;
     double timestamp;
 };
-
+// 玩家挡板输入数据结构
 struct PaddleInput {
     float x;
 };
@@ -51,14 +52,14 @@ GameState lastState = {};
 bool hasLastState = false;
 PaddleInput currentInput = {};
 
-// ===================== 本周任务：多线程相关 =====================
+// ===================== 多线程异步加载相关 =====================
 enum class LoadState { IDLE, LOADING, DONE };
 LoadState loadState = LoadState::IDLE;
 std::future<void> loadFuture;
 std::mutex loadMutex;
 bool bricksLoaded = false;
 
-// 线程安全的纹理缓存（加分项）
+// 线程安全的纹理缓存
 class TextureCache {
 private:
     std::unordered_map<std::string, Texture2D> cache;
@@ -66,11 +67,12 @@ private:
 
     TextureCache() = default;
 public:
-    static TextureCache& getInstance() {
+// 获取单例对象
+        static TextureCache& getInstance() {
         static TextureCache instance;
         return instance;
     }
-
+// 读取缓存纹理
     Texture2D get(const std::string& path) {
         std::lock_guard<std::mutex> lock(mtx);
         auto it = cache.find(path);
@@ -80,7 +82,7 @@ public:
         cache[path] = tex;
         return tex;
     }
-
+// 清空缓存释放资源
     void clear() {
         std::lock_guard<std::mutex> lock(mtx);
         for (auto& pair : cache) {
@@ -97,7 +99,7 @@ void LoadLevelAsync() {
     bricksLoaded = true;
 }
 
-// ===================== 课程优化：网格空间划分（优化碰撞检测） =====================
+// ===================== 网格空间划分（优化碰撞检测） =====================
 #define GRID_COLS 16
 #define GRID_ROWS 12
 #define CELL_WIDTH (800.0f / GRID_COLS)
@@ -120,13 +122,15 @@ void UpdateBrickGrid(std::vector<Brick>& bricks) {
     }
 }
 
-// ===================== 本周任务：JSON关卡加载 =====================
+// ===================== JSON关卡加载 =====================
+// 砖块配色映射数组
 std::vector<Color> colorMap = {RED, ORANGE, YELLOW, GREEN, BLUE};
-
+// 从JSON文件加载关卡砖块数据
 void LoadLevelFromJSON(int level, std::vector<Brick>& bricks, int& winCount) {
     bricks.clear();
     std::string filename = "levels/level" + std::to_string(level) + ".json";
     std::ifstream file(filename);
+// 文件不存在使用默认关卡
     if (!file.is_open()) {
         TraceLog(LOG_WARNING, "关卡文件不存在，使用默认配置");
         for (int row = 0; row < 5; row++) {
@@ -137,7 +141,7 @@ void LoadLevelFromJSON(int level, std::vector<Brick>& bricks, int& winCount) {
         winCount = bricks.size();
         return;
     }
-
+// 解析JSON关卡配置
     try {
         json config;
         file >> config;
@@ -153,7 +157,7 @@ void LoadLevelFromJSON(int level, std::vector<Brick>& bricks, int& winCount) {
                 int type = layout[i][j];
                 if (type != 0) {
                     Color color = colorMap[type - 1];
-                    // 原来的代码（固定位置）
+                    
 float brickSpacing = 10.0f;
 float startX = (800.0f - (cols * brickWidth + (cols - 1) * brickSpacing)) / 2; // 用800代替screenWidth
 float startY = 80.0f;
@@ -170,6 +174,7 @@ bricks.emplace_back(
             }
         }
     } catch (const json::parse_error& e) {
+        // JSON解析异常降级默认关卡
         TraceLog(LOG_ERROR, "JSON解析失败: %s", e.what());
         for (int row = 0; row < 5; row++) {
             for (int col = 0; col < 8; col++) {
@@ -180,14 +185,15 @@ bricks.emplace_back(
     }
 }
 
-// ===================== 本周任务：存档/读档 =====================
+// ===================== 存档/读档 =====================
+// 存档数据结构体
 struct GameSave {
     int version = 1;
     int currentLevel = 1;
     int score = 0;
     int lives = 3;
 };
-
+// 保存游戏进度到本地文件
 void SaveGame(const GameSave& save) {
     json j;
     j["version"] = save.version;
@@ -201,7 +207,7 @@ void SaveGame(const GameSave& save) {
         TraceLog(LOG_INFO, "游戏已存档");
     }
 }
-
+// 读取本地存档恢复游戏进度
 bool LoadGame(GameSave& save) {
     std::ifstream file("save.json");
     if (!file.is_open()) return false;
@@ -225,12 +231,13 @@ bool LoadGame(GameSave& save) {
 }
 
 // ===================== 排行榜 =====================
+// 单条分数记录结构
 struct ScoreEntry {
     char name[32];
     int score;
     time_t timestamp;
 };
-
+// 排行榜管理类
 class Leaderboard {
 private:
     static const int MAX_ENTRIES = 10;
@@ -239,8 +246,9 @@ private:
     const char* filename;
     
 public:
+// 构造初始化并加载榜单
     Leaderboard(const char* file) : count(0), filename(file) { Load(); }
-    
+    // 读取本地榜单文件
     void Load() {
         FILE* f = fopen(filename, "r");
         if (f) {
@@ -251,7 +259,7 @@ public:
             fclose(f);
         }
     }
-    
+    // 保存榜单数据到文件
     void Save() {
         FILE* f = fopen(filename, "w");
         if (f) {
@@ -259,7 +267,7 @@ public:
             fclose(f);
         }
     }
-    
+    // 添加新分数并排序
     int AddScore(const char* name, int score) {
         int rank = 1;
         for (int i = 0; i < count; i++) {
@@ -277,7 +285,7 @@ public:
         Save();
         return rank;
     }
-    
+    // 根据排名获取记录
     bool GetEntry(int rank, ScoreEntry& entry) { 
         if (rank > 0 && rank <= count) { 
             entry = entries[rank - 1]; 
@@ -285,9 +293,9 @@ public:
         } 
         return false; 
     }
-
+// 获取榜单有效条数
     int GetCount() { return count; }
-
+// 判断分数能否上榜
     bool CanEnter(int score) { 
         return count < MAX_ENTRIES || score > entries[count - 1].score; 
     }
@@ -295,7 +303,7 @@ public:
 
 static Font chineseFont;
 static bool fontLoaded = false;
-
+// 初始化加载中文字体
 void InitChineseFont() {
     const char* text = "FPS Physics 分数生命暂停继续重新开始游戏结束胜利排行榜第名按P-暂停按R-重新开始时间倍率落地惩罚恭喜进入空格发射等待加长板多球减速球暂无记录秒 BOOST 按 M 查看排行榜 : !    Breakout - 联机版 + 多线程     加载完成！砖块已变色 L ding... 关卡 1 2 3 4 5 6 7 8 9 0 / 检测到存档，按空格继续 N 切换";
 
@@ -330,28 +338,28 @@ void InitChineseFont() {
 
     UnloadCodepoints(codepoints);
 }
-
+// 绘制普通位置中文文本
 void DrawChineseText(const char* text, int x, int y, int fontSize, Color color) {
     Vector2 pos = { (float)x, (float)y };
     DrawTextEx(chineseFont, text, pos, 24, 2, color);
 }
-
+// 绘制水平居中中文文本
 void DrawChineseTextCentered(const char* text, int y, int fontSize, Color color) {
     Vector2 size = MeasureTextEx(chineseFont, text, 24, 2);
     DrawChineseText(text, (GetScreenWidth() - (int)size.x) / 2, y, fontSize, color);
 }
-
+// 根据游戏时长计算得分倍率
 int CalculateScore(int baseScore, float gameTime) {
     float multiplier = 5.0f - gameTime * 0.05f;
     if (multiplier < 1.0f) multiplier = 1.0f;
     return (int)(baseScore * multiplier);
 }
-
+// 挡板、球体尺寸速度常量
 static const float DEFAULT_PADDLE_WIDTH = 120.0f;
 static const float EXTENDED_PADDLE_WIDTH = 200.0f;
 static const float DEFAULT_BALL_MAX_SPEED = 15.0f;
 static const float SLOW_BALL_MAX_SPEED = 9.0f;
-
+// 获取道具对应中文名称
 const char* GetPowerupName(PowerupType type) {
     switch (type) {
         case PowerupType::ExtendPaddle: return "加长板";
@@ -360,7 +368,7 @@ const char* GetPowerupName(PowerupType type) {
         default: return "未知";
     }
 }
-
+// 读取道具配置文件
 bool LoadPowerupConfigs(std::vector<PowerupConfig>& configs) {
     if (PowerupFactory::LoadConfig("powerups.json", configs)) return true;
     if (PowerupFactory::LoadConfig("../powerups.json", configs)) return true;
@@ -370,14 +378,14 @@ bool LoadPowerupConfigs(std::vector<PowerupConfig>& configs) {
     configs.push_back({ PowerupType::SlowBall, "减速球", 10.0f, 0.15f, Color{120, 255, 180, 255}, 30.0f });
     return true;
 }
-
+// 按概率随机选取生成道具
 const PowerupConfig* ChoosePowerup(const std::vector<PowerupConfig>& configs) {
     for (const auto& cfg : configs) {
         if ((float)rand() / (float)RAND_MAX < cfg.chance) return &cfg;
     }
     return nullptr;
 }
-
+// 执行道具生效效果
 void ApplyPowerupEffect(PowerupType type, Paddle& paddle, std::vector<Ball>& balls, std::vector<ActivePowerup>& activeEffects, const std::vector<PowerupConfig>& configs, ParticleSystem& particles) {
     const PowerupConfig* cfg = PowerupFactory::FindConfig(type, configs);
     if (!cfg) return;
@@ -420,7 +428,7 @@ void ApplyPowerupEffect(PowerupType type, Paddle& paddle, std::vector<Ball>& bal
 
     particles.EmitAura(paddle.GetRect(), cfg->color);
 }
-
+// 更新道具剩余生效时间，过期还原状态
 void UpdateActiveEffects(float delta, Paddle& paddle, std::vector<Ball>& balls, std::vector<ActivePowerup>& activeEffects) {
     bool stillExtended = false;
     bool stillSlow = false;
@@ -444,8 +452,9 @@ void UpdateActiveEffects(float delta, Paddle& paddle, std::vector<Ball>& balls, 
         balls.erase(balls.begin() + 1, balls.end());
     }
 }
-
+// 程序主入口函数
 int main(int argc, char* argv[]) {
+// 初始化网络库
     if (enet_initialize() != 0) {
         std::cout << "ENet 初始化失败！" << std::endl;
         return 1;
@@ -462,7 +471,7 @@ int main(int argc, char* argv[]) {
         std::cout << "用法：./breakout_week2 host|client\n";
         return 1;
     }
-
+// 创建网络监听/连接
     if (isHost) {
         ENetAddress address;
         enet_address_set_host(&address, "0.0.0.0");
@@ -477,12 +486,12 @@ int main(int argc, char* argv[]) {
         netPeer = enet_host_connect(netHost, &address, 2, 0);
         std::cout << "🔗 正在连接主机...\n";
     }
-
+// 窗口尺寸定义
     const int screenWidth = 800, screenHeight = 600;
     InitWindow(screenWidth, screenHeight, "Breakout - 联机版 + 多线程");
     InitChineseFont();
     Leaderboard leaderboard("scores.txt");
-    
+// 游戏对象初始化
     std::vector<Ball> balls;
     balls.emplace_back(Vector2{400.0f, 530.0f}, Vector2{0.0f, 0.0f}, 10.0f);
     Paddle paddle(340.0f, 550.0f, DEFAULT_PADDLE_WIDTH, 15.0f);
@@ -492,13 +501,14 @@ int main(int argc, char* argv[]) {
     const int totalLevels = 3;
     int currentLevel = 1;
     int score = 0, lives = 3, playerRank = 0;
-
+// 读取本地存档
     GameSave save;
     if (LoadGame(save)) {
         currentLevel = save.currentLevel;
         score = save.score;
         lives = save.lives;
         EndDrawing();
+        // 存档选择弹窗
         while (!IsKeyPressed(KEY_SPACE) && !IsKeyPressed(KEY_R) && !WindowShouldClose()) {
             BeginDrawing();
             ClearBackground(BLACK);
@@ -514,25 +524,25 @@ int main(int argc, char* argv[]) {
         }
     }
     LoadLevelFromJSON(currentLevel, bricks, winCount);
-
+// 道具、粒子系统初始化
     std::vector<PowerupConfig> powerupConfigs;
     LoadPowerupConfigs(powerupConfigs);
     std::vector<Powerup> powerups;
     ParticleSystem particles;
     std::vector<ActivePowerup> activeEffects;
-
+// 游戏状态标记
     bool gameOver = false, paused = false, victory = false, showLeaderboard = false;
     float gameTime = 0.0f;
 
     SetTargetFPS(60);
-    
+// 性能统计变量
     double totalFrameTime = 0.0;
     double totalPhysicsTime = 0.0;
     int frameCount = 0;
-
+// 游戏主循环
     while (!WindowShouldClose()) {
         double frameStartTime = GetTime();
-
+// 处理网络收发事件
         ENetEvent event;
         while (enet_host_service(netHost, &event, 0) > 0) {
             if (event.type == ENET_EVENT_TYPE_CONNECT) {
@@ -556,7 +566,7 @@ int main(int argc, char* argv[]) {
                 netPeer = nullptr;
             }
         }
-
+// 主机定时同步游戏状态
         static float sendTimer = 0;
         sendTimer += GetFrameTime();
         if (isHost && netPeer && sendTimer > 1.0f / 30.0f) {
@@ -578,7 +588,7 @@ int main(int argc, char* argv[]) {
             sendTimer = 0;
         }
 
-        // ========== N 键跳关（修复完成） ==========
+        // ========== N 键跳关 ==========
         if (IsKeyPressed(KEY_N))
         {
             if (currentLevel < totalLevels)
@@ -596,13 +606,13 @@ int main(int argc, char* argv[]) {
                 activeEffects.clear();
             }
         }
-
+// 客户端上传挡板位置
         if (!isHost) {
             currentInput.x = paddle.GetRect().x;
             ENetPacket* packet = enet_packet_create(&currentInput, sizeof(currentInput), 0);
             enet_peer_send(netPeer, 0, packet);
         }
-
+// 按键功能：暂停、重开、排行榜
         if (IsKeyPressed(KEY_P) && !gameOver) paused = !paused;
         if (IsKeyPressed(KEY_R)) {
             balls.clear();
@@ -617,13 +627,13 @@ int main(int argc, char* argv[]) {
             remove("save.json");
         }
         if (IsKeyPressed(KEY_M)) showLeaderboard = !showLeaderboard;
-
+// L键触发异步加载任务
         if (IsKeyPressed(KEY_L) && loadState == LoadState::IDLE) {
             loadState = LoadState::LOADING;
             bricksLoaded = false;
             loadFuture = std::async(std::launch::async, LoadLevelAsync);
         }
-
+// 检测异步加载完成状态
         if (loadState == LoadState::LOADING) {
             auto status = loadFuture.wait_for(std::chrono::seconds(0));
             if (status == std::future_status::ready) {
@@ -636,26 +646,26 @@ int main(int argc, char* argv[]) {
 
         float delta = GetFrameTime();
         double physicsStartTime = GetTime();
-        
+// 游戏逻辑更新
         if (!gameOver && !paused) {
             if (!balls.empty() && balls.front().IsLaunched()) gameTime += delta;
-
+// 挡板移动控制
             float currentSpeed = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 28.0f : 18.0f;
             if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) paddle.MoveLeft(currentSpeed);
             if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) paddle.MoveRight(currentSpeed);
-
+// 球体发射与跟随
             if (!balls.empty() && !balls.front().IsLaunched()) {
                 balls.front().ResetToPaddle(paddle.GetRect().x + paddle.GetRect().width / 2, paddle.GetRect().y);
                 if (IsKeyPressed(KEY_SPACE)) balls.front().Launch(paddle.GetRect().x + paddle.GetRect().width / 2, paddle.GetRect().width);
             }
-
+// 球体物理运动更新
             for (auto& ball : balls) {
                 ball.ApplyGravity();
                 ball.Move();
                 ball.BounceEdge(screenWidth, screenHeight);
                 ball.BouncePaddle(paddle.GetRect());
             }
-
+// 网格碰撞检测更新
             UpdateBrickGrid(bricks);
             for (auto& ball : balls) {
                 Vector2 pos = ball.GetPosition();
@@ -685,7 +695,7 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // ========== 500 分自动进下一关（修复完成） ==========
+            // ========== 500 分自动进下一关 ==========
             if (score >= 500 && currentLevel < totalLevels && !gameOver && !paused)
             {
                 currentLevel++;
@@ -701,7 +711,7 @@ int main(int argc, char* argv[]) {
                 activeEffects.clear();
             }
 
-            // 原有砖块清关逻辑
+            // 通关切换关卡判断
             if (winCount <= 0) {
                 if (currentLevel < totalLevels) {
                     currentLevel++;
@@ -723,11 +733,12 @@ int main(int argc, char* argv[]) {
                     remove("save.json");
                 }
             }
-
+             // 剔除出界球体
             std::vector<Ball> remainingBalls;
             for (auto& ball : balls) {
                 if (ball.GetPosition().y <= screenHeight + 50) remainingBalls.push_back(ball);
             }
+            // 球体全部掉落扣除生命
             if (remainingBalls.empty()) {
                 lives--;
                 score -= 50;
@@ -749,7 +760,7 @@ int main(int argc, char* argv[]) {
                 }
             }
             balls = std::move(remainingBalls);
-
+// 道具更新与拾取判定
             for (auto& powerup : powerups) {
                 powerup.Update(delta);
                 if (powerup.CheckCatch(paddle.GetRect())) {
@@ -757,24 +768,25 @@ int main(int argc, char* argv[]) {
                 }
             }
             powerups.erase(std::remove_if(powerups.begin(), powerups.end(), [](const Powerup& powerup) { return !powerup.IsAlive(); }), powerups.end());
-
+// 道具时效、粒子动画更新
             UpdateActiveEffects(delta, paddle, balls, activeEffects);
             particles.Update(delta);
         }
         
         double physicsElapsed = GetTime() - physicsStartTime;
         totalPhysicsTime += physicsElapsed;
-
+// 画面渲染绘制
         BeginDrawing();
         ClearBackground(Color{30, 30, 40, 255});
+// 绘制游戏边界墙
         DrawRectangle(0, 0, 5, screenHeight, GRAY);
         DrawRectangle(screenWidth - 5, 0, 5, screenHeight, GRAY);
         DrawRectangle(0, 0, screenWidth, 5, GRAY);
-
+// 绘制场景元素
         for (auto& brick : bricks) brick.Draw();
         for (auto& powerup : powerups) powerup.Draw(chineseFont);
         particles.Draw();
-
+// 主机客户端画面区分绘制
         if (isHost) {
             paddle.Draw();
             for (auto& ball : balls) ball.Draw();
@@ -782,7 +794,7 @@ int main(int argc, char* argv[]) {
         } else {
             paddle.Draw();
             DrawRectangle(remoteState.paddle1X, 550, DEFAULT_PADDLE_WIDTH, 15, BLUE);
-
+// 球体位置插值平滑
             if (hasLastState) {
                 double now = GetTime();
                 float t = (now - lastState.timestamp) / (remoteState.timestamp - lastState.timestamp + 0.001f);
@@ -794,52 +806,50 @@ int main(int argc, char* argv[]) {
                 DrawCircle(remoteState.ballX, remoteState.ballY, 10, WHITE);
             }
         }
-
+// 异步加载状态提示文字
         if (loadState == LoadState::LOADING) {
             DrawChineseTextCentered("Loading...", screenHeight / 2, 30, YELLOW);
         } else if (loadState == LoadState::DONE) {
             DrawChineseTextCentered("加载完成！砖块已变色", screenHeight / 2, 24, GREEN);
         }
+// 游戏信息UI绘制
+         char levelStr[64];
+         sprintf(levelStr, "关卡: %d / %d", currentLevel, totalLevels);
+         DrawChineseText(levelStr, 20, 15, 22, WHITE);
 
-        // ========== UI 不重叠（修复完成） ==========
-        // ========== 纯中文UI，不会显示问号 ==========
-char levelStr[64];
-sprintf(levelStr, "关卡: %d / %d", currentLevel, totalLevels);
-DrawChineseText(levelStr, 20, 15, 22, WHITE);
+         char scoreStr[64];
+         sprintf(scoreStr, "分数: %d / 500", score);
+         DrawChineseText(scoreStr, 20, 45, 22, YELLOW);
 
-char scoreStr[64];
-sprintf(scoreStr, "分数: %d / 500", score);
-DrawChineseText(scoreStr, 20, 45, 22, YELLOW);
+         char livesStr[64];
+         sprintf(livesStr, "生命: %d", lives);
+         DrawChineseText(livesStr, 20, 75, 22, GREEN);
 
-char livesStr[64];
-sprintf(livesStr, "生命: %d", lives);
-DrawChineseText(livesStr, 20, 75, 22, GREEN);
-
-char timeStr[64];
-sprintf(timeStr, "时间: %.1f 秒", gameTime);
-DrawChineseText(timeStr, 20, 105, 20, SKYBLUE);
+         char timeStr[64];
+         sprintf(timeStr, "时间: %.1f 秒", gameTime);
+         DrawChineseText(timeStr, 20, 105, 20, SKYBLUE);
 
         float currentMultiplier = 5.0f - gameTime * 0.05f;
         if (currentMultiplier < 1.0f) currentMultiplier = 1.0f;
         DrawText(TextFormat("x%.1f", currentMultiplier), 140, 105, 20, currentMultiplier > 2.0f ? GREEN : LIGHTGRAY);
-
+// 生效道具提示
         int effectY = 135;
         for (const auto& effect : activeEffects) {
             DrawChineseText(TextFormat("%s: %.0fs", GetPowerupName(effect.type), effect.remaining), 20, effectY, 18, SKYBLUE);
             effectY += 22;
         }
-
+// 操作提示文本
         if (!balls.empty() && !balls.front().IsLaunched()) DrawChineseTextCentered("按空格发射", 55, 20, YELLOW);
         DrawChineseTextCentered("按 M 查看排行榜", 40, 20, Fade(WHITE, 0.7f));
         DrawChineseText("P-暂停 R-重开 M-排行 L-加载 N-切换关卡", 280, 12, 18, Fade(WHITE, 0.6f));
         if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) DrawChineseText(">>> BOOST <<<", 350, 575, 18, YELLOW);
-
+// 暂停界面绘制
         if (paused && !gameOver) {
             DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.7f));
             DrawChineseTextCentered("暂停", screenHeight/2 - 40, 48, YELLOW);
             DrawChineseTextCentered("按 P 继续", screenHeight/2 + 30, 24, WHITE);
         }
-
+// 游戏结束结算界面
       if (gameOver) {
     DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.85f));
 
@@ -850,7 +860,6 @@ DrawChineseText(timeStr, 20, 105, 20, SKYBLUE);
         float titleX = (screenWidth - titleSize.x) / 2;
         float titleY = screenHeight / 2 - 180;
 
-        // 先画黑色描边，让文字更清晰
         DrawTextEx(chineseFont, title, (Vector2){titleX + 3, titleY + 3}, titleFontSize, 2, BLACK);
         DrawTextEx(chineseFont, title, (Vector2){titleX, titleY}, titleFontSize, 2, GREEN);
     } else {
@@ -860,12 +869,10 @@ DrawChineseText(timeStr, 20, 105, 20, SKYBLUE);
         float titleX = (screenWidth - titleSize.x) / 2;
         float titleY = screenHeight / 2 - 180;
 
-        // 先画黑色描边，让文字更清晰
         DrawTextEx(chineseFont, title, (Vector2){titleX + 3, titleY + 3}, titleFontSize, 2, BLACK);
         DrawTextEx(chineseFont, title, (Vector2){titleX, titleY}, titleFontSize, 2, RED);
     }
 
-    // 分数（36号，加描边）
     char scoreBuf[64];
     sprintf(scoreBuf, "分数: %d", score);
     int scoreFontSize = 36;
@@ -875,7 +882,6 @@ DrawChineseText(timeStr, 20, 105, 20, SKYBLUE);
     DrawTextEx(chineseFont, scoreBuf, (Vector2){scoreX + 2, scoreY + 2}, scoreFontSize, 2, BLACK);
     DrawTextEx(chineseFont, scoreBuf, (Vector2){scoreX, scoreY}, scoreFontSize, 2, YELLOW);
 
-    // 排名（30号，加描边）
     if (playerRank > 0) {
         char rankBuf[64];
         sprintf(rankBuf, "恭喜进入排行榜第 %d 名!", playerRank);
@@ -887,7 +893,6 @@ DrawChineseText(timeStr, 20, 105, 20, SKYBLUE);
         DrawTextEx(chineseFont, rankBuf, (Vector2){rankX, rankY}, rankFontSize, 2, GOLD);
     }
 
-    // 提示语（26号，加描边）
     const char* restart = "按 R 重新开始";
     int restartFontSize = 26;
     Vector2 restartSize = MeasureTextEx(chineseFont, restart, restartFontSize, 2);
@@ -896,6 +901,7 @@ DrawChineseText(timeStr, 20, 105, 20, SKYBLUE);
     DrawTextEx(chineseFont, restart, (Vector2){restartX + 2, restartY + 2}, restartFontSize, 2, BLACK);
     DrawTextEx(chineseFont, restart, (Vector2){restartX, restartY}, restartFontSize, 2, WHITE);
 }
+// 排行榜界面绘制
         if (showLeaderboard) {
             DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.9f));
             DrawChineseTextCentered("排行榜", 40, 36, GOLD);
@@ -920,32 +926,33 @@ DrawChineseText(timeStr, 20, 105, 20, SKYBLUE);
             if (leaderboard.GetCount() == 0) DrawChineseTextCentered("暂无记录", screenHeight/2, 24, Fade(WHITE, 0.5f));
             DrawChineseTextCentered("按 M 关闭排行榜", screenHeight - 50, 20, Fade(WHITE, 0.5f));
         }
-
+// 性能帧率显示
         float currentFPS = 1.0f / GetFrameTime();
         DrawText(TextFormat("FPS: %.1f", currentFPS), 20, 550, 20, GREEN);
         DrawText(TextFormat("Physics: %.2f ms", physicsElapsed * 1000), 20, 575, 20, YELLOW);
         
         EndDrawing();
-
+// 帧耗时统计
         double frameElapsed = GetTime() - frameStartTime;
         totalFrameTime += frameElapsed;
         frameCount++;
-
+// 每30帧打印平均性能
         if (frameCount % 30 == 0) {
             double avgFPS = frameCount / totalFrameTime;
             double avgPhysics = totalPhysicsTime / frameCount * 1000;
-            printf("【优化后】平均FPS: %.2f | 物理耗时: %.2f ms\n", avgFPS, avgPhysics);
+            //printf("【优化后】平均FPS: %.2f | 物理耗时: %.2f ms\n", avgFPS, avgPhysics);
         }
     }
+// 输出最终性能统计
 
     if (frameCount > 0) {
         double avgFPS = frameCount / totalFrameTime;
         double avgPhysics = totalPhysicsTime / frameCount * 1000;
-        printf("\n===== 优化后最终测试结果 =====\n");
-        printf("平均 FPS: %.2f\n", avgFPS);
-        printf("平均物理/碰撞耗时: %.2f ms\n", avgPhysics);
+        //printf("\n===== 优化后最终测试结果 =====\n");
+        //printf("平均 FPS: %.2f\n", avgFPS);
+        //printf("平均物理/碰撞耗时: %.2f ms\n", avgPhysics);
     }
-
+// 释放全局资源
     if (netHost) enet_host_destroy(netHost);
     enet_deinitialize();
     TextureCache::getInstance().clear();
